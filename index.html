@@ -18,6 +18,7 @@
 
   <title>Smart Parking - Pulpit Sterowniczy</title>
   
+  <!-- Biblioteki zewnętrzne -->
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
@@ -39,7 +40,6 @@
     body { background-color: var(--bg); color: var(--text-main); padding: 16px; display: flex; justify-content: center; }
     .container { width: 100%; max-width: 900px; display: flex; flex-direction: column; gap: 16px; }
 
-    /* Nagłówek */
     header {
       background: var(--card-bg);
       border: 1px solid var(--card-border);
@@ -66,7 +66,6 @@
     }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 
-    /* Siatka kart */
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -83,33 +82,31 @@
       gap: 14px;
     }
     .card h2 { font-size: 1.05rem; color: var(--accent); border-bottom: 1px solid var(--card-border); padding-bottom: 8px; }
+    .card-full { grid-column: 1 / -1; }
 
-    /* Karta pełnej szerokości pod wykres */
-    .card-full {
-      grid-column: 1 / -1;
-    }
-
-    /* Wskaźniki i przyciski */
     .val-display { font-size: 2rem; font-weight: 700; color: var(--green); }
     .val-sub { font-size: 0.85rem; color: var(--text-muted); }
 
-    .btn-group { display: flex; gap: 10px; }
+    .btn-group { display: flex; gap: 8px; }
     button {
       flex: 1;
-      padding: 12px;
+      padding: 10px;
       border: none;
       border-radius: 8px;
       font-weight: 600;
-      font-size: 0.9rem;
+      font-size: 0.85rem;
       cursor: pointer;
       transition: all 0.2s ease;
+    }
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
     }
     .btn-primary { background: var(--primary); color: white; }
     .btn-primary:active { transform: scale(0.97); }
     .btn-danger { background: var(--red); color: white; }
     .btn-secondary { background: #334155; color: white; }
 
-    /* Kafelek alarmowy */
     .alarm-banner {
       display: none;
       background: var(--red);
@@ -126,13 +123,22 @@
       to { opacity: 1; transform: scale(1.01); }
     }
 
-    /* Pigułki statusu */
     .row { display: flex; justify-content: space-between; align-items: center; }
     .badge { padding: 4px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; }
     .badge-closed { background: #334155; color: var(--text-muted); }
     .badge-open { background: rgba(16, 185, 129, 0.2); color: var(--green); border: 1px solid var(--green); }
 
-    /* Moduł Harmonogramu */
+    /* Moduł wierszy garażowych */
+    .garage-item {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px 10px;
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+    }
+
     .sched-box {
       margin-top: 6px;
       padding: 12px;
@@ -143,23 +149,15 @@
       flex-direction: column;
       gap: 10px;
     }
-    .toggle-switch {
-      position: relative;
-      width: 44px;
-      height: 24px;
-    }
+    .toggle-switch { position: relative; width: 44px; height: 24px; }
     .toggle-switch input { opacity: 0; width: 0; height: 0; }
     .slider {
       position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #334155;
-      transition: .3s;
-      border-radius: 24px;
+      background-color: #334155; transition: .3s; border-radius: 24px;
     }
     .slider:before {
       position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px;
-      background-color: white;
-      transition: .3s;
-      border-radius: 50%;
+      background-color: white; transition: .3s; border-radius: 50%;
     }
     input:checked + .slider { background-color: var(--green); }
     input:checked + .slider:before { transform: translateX(20px); }
@@ -174,13 +172,7 @@
       font-size: 1rem;
       outline: none;
     }
-    input[type="time"]:focus { border-color: var(--accent); }
-
-    .chart-container {
-      position: relative;
-      width: 100%;
-      height: 260px;
-    }
+    .chart-container { position: relative; width: 100%; height: 260px; }
   </style>
 </head>
 <body>
@@ -225,7 +217,7 @@
         <button class="btn-secondary" onclick="setLightsManual('OFF')">Wyłącz</button>
       </div>
 
-      <!-- MODUŁ HARMONOGRAMU ŚWIATEŁ -->
+      <!-- HARMONOGRAM -->
       <div class="sched-box">
         <div class="row">
           <div>
@@ -251,24 +243,44 @@
       </div>
     </div>
 
-    <!-- WĘZEŁ 1: BRAMY GARAŻOWE -->
+    <!-- WĘZEŁ 1: STEROWANIE GARAŻAMI (G1, G2, G3) -->
     <div class="card">
       <h2>Boksy Garażowe (Węzeł 1)</h2>
-      <div class="row">
-        <span>Garaż 1:</span>
-        <span id="g1Badge" class="badge badge-closed">ZAMK</span>
+      
+      <!-- BOKS 1 -->
+      <div class="garage-item">
+        <div class="row">
+          <span>Garaż 1:</span>
+          <span id="g1Badge" class="badge badge-closed">ZAMK</span>
+        </div>
+        <div class="btn-group">
+          <button class="btn-secondary gate-ctrl" onclick="controlGarage(1, 'OPEN')">Otwórz G1</button>
+          <button class="btn-secondary gate-ctrl" onclick="controlGarage(1, 'CLOSE')">Zamknij G1</button>
+        </div>
       </div>
-      <div class="row">
-        <span>Garaż 2:</span>
-        <span id="g2Badge" class="badge badge-closed">ZAMK</span>
+
+      <!-- BOKS 2 -->
+      <div class="garage-item">
+        <div class="row">
+          <span>Garaż 2:</span>
+          <span id="g2Badge" class="badge badge-closed">ZAMK</span>
+        </div>
+        <div class="btn-group">
+          <button class="btn-secondary gate-ctrl" onclick="controlGarage(2, 'OPEN')">Otwórz G2</button>
+          <button class="btn-secondary gate-ctrl" onclick="controlGarage(2, 'CLOSE')">Zamknij G2</button>
+        </div>
       </div>
-      <div class="row">
-        <span>Garaż 3:</span>
-        <span id="g3Badge" class="badge badge-closed">ZAMK</span>
-      </div>
-      <div class="btn-group">
-        <button class="btn-secondary" onclick="controlGarage(1, 'OPEN')">Otwórz G1</button>
-        <button class="btn-secondary" onclick="controlGarage(1, 'CLOSE')">Zamknij G1</button>
+
+      <!-- BOKS 3 -->
+      <div class="garage-item">
+        <div class="row">
+          <span>Garaż 3:</span>
+          <span id="g3Badge" class="badge badge-closed">ZAMK</span>
+        </div>
+        <div class="btn-group">
+          <button class="btn-secondary gate-ctrl" onclick="controlGarage(3, 'OPEN')">Otwórz G3</button>
+          <button class="btn-secondary gate-ctrl" onclick="controlGarage(3, 'CLOSE')">Zamknij G3</button>
+        </div>
       </div>
     </div>
 
@@ -292,7 +304,7 @@
       </div>
     </div>
 
-    <!-- WYKRES TELEMETRII NA ŻYWO (CHART.JS) -->
+    <!-- WYKRES TELEMETRII -->
     <div class="card card-full">
       <div class="row">
         <h2>Telemetria Środowiskowa na Żywo (DHT22)</h2>
@@ -306,15 +318,15 @@
 </div>
 
 <script>
-  // Konfiguracja WebSockets dla brokera HiveMQ / mqtt-dashboard
+  // Zgodna domena WebSocket z certyfikatem SSL
   const brokerUrl = "wss://broker.hivemq.com:8884/mqtt";
   const clientId = "WebClient_" + Math.random().toString(16).substr(2, 8);
 
   const client = mqtt.connect(brokerUrl, { clientId: clientId, keepalive: 30 });
 
   let ostatniStanHarmonogramu = null;
+  let trybAlarmuAktywny = false;
 
-  // Inicjalizacja wykresu Chart.js
   const ctx = document.getElementById('envChart').getContext('2d');
   const maxSamples = 20;
 
@@ -352,56 +364,42 @@
       maintainAspectRatio: false,
       animation: { duration: 400 },
       scales: {
-        x: {
-          grid: { color: '#26354a' },
-          ticks: { color: '#94a3b8', font: { size: 11 } }
-        },
-        yTemp: {
-          type: 'linear',
-          position: 'left',
-          grid: { color: '#26354a' },
-          ticks: { color: '#10b981', font: { size: 11 } },
-          suggestedMin: 15,
-          suggestedMax: 35
-        },
-        yHum: {
-          type: 'linear',
-          position: 'right',
-          grid: { drawOnChartArea: false },
-          ticks: { color: '#38bdf8', font: { size: 11 } },
-          suggestedMin: 20,
-          suggestedMax: 90
-        }
+        x: { grid: { color: '#26354a' }, ticks: { color: '#94a3b8', font: { size: 11 } } },
+        yTemp: { type: 'linear', position: 'left', grid: { color: '#26354a' }, ticks: { color: '#10b981', font: { size: 11 } }, suggestedMin: 15, suggestedMax: 35 },
+        yHum: { type: 'linear', position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#38bdf8', font: { size: 11 } }, suggestedMin: 20, suggestedMax: 90 }
       },
-      plugins: {
-        legend: {
-          labels: { color: '#f8fafc', font: { size: 12 } }
-        }
-      }
+      plugins: { legend: { labels: { color: '#f8fafc', font: { size: 12 } } } }
     }
   });
 
   client.on('connect', () => {
     document.getElementById('netStatus').className = "status-badge online";
     document.getElementById('netText').innerText = "ONLINE";
-
     client.subscribe("parking/#");
   });
 
-  client.on('error', (err) => {
-    console.error("Błąd połączenia MQTT:", err);
-  });
-
+  client.on('error', (err) => console.error("Błąd połączenia MQTT:", err));
   client.on('close', () => {
     document.getElementById('netStatus').className = "status-badge";
     document.getElementById('netText').innerText = "ROZŁĄCZONO";
   });
 
-  // Odbiór wiadomości telemetrycznych
+  function ustawPigułkę(elementId, czyOtwarte) {
+    const badge = document.getElementById(elementId);
+    if (!badge) return;
+    if (czyOtwarte) {
+      badge.className = "badge badge-open";
+      badge.innerText = "OTWARTY";
+    } else {
+      badge.className = "badge badge-closed";
+      badge.innerText = "ZAMKNIĘTY";
+    }
+  }
+
   client.on('message', (topic, payload) => {
     const msg = payload.toString();
 
-    // 1. Ruch i miejsca parkingowe
+    // 1. Ruch i miejsca
     if (topic === "parking/traffic") {
       try {
         const data = JSON.parse(msg);
@@ -424,7 +422,7 @@
       }
     }
 
-    // 3. Status oświetlenia
+    // 3. Oświetlenie
     if (topic === "parking/status/lights" || topic === "parking/lights") {
       const lb = document.getElementById('lightBadge');
       if (msg === "ON" || msg === "1") {
@@ -440,22 +438,13 @@
       }
     }
 
-    // 4. Bramy garażowe
-    if (topic.startsWith("parking/garage/")) {
+    // 4. Bramy garażowe (jeśli nie ma alarmu)
+    if (!trybAlarmuAktywny && topic.startsWith("parking/garage/")) {
       const gNum = topic.split("/")[2];
-      const badge = document.getElementById("g" + gNum + "Badge");
-      if (badge) {
-        if (msg === "OPEN") {
-          badge.className = "badge badge-open";
-          badge.innerText = "OTWARTY";
-        } else {
-          badge.className = "badge badge-closed";
-          badge.innerText = "ZAMKNIĘTY";
-        }
-      }
+      ustawPigułkę("g" + gNum + "Badge", msg === "OPEN");
     }
 
-    // 5. Środowisko i aktualizacja wykresu
+    // 5. Środowisko
     if (topic === "parking/environment") {
       try {
         const env = JSON.parse(msg);
@@ -463,9 +452,7 @@
           document.getElementById('tempVal').innerText = env.temp.toFixed(1) + " °C";
           document.getElementById('humVal').innerText = Math.round(env.hum) + " %";
 
-          const now = new Date();
-          const timestamp = now.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
+          const timestamp = new Date().toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
           envChart.data.labels.push(timestamp);
           envChart.data.datasets[0].data.push(env.temp);
           envChart.data.datasets[1].data.push(env.hum);
@@ -475,24 +462,35 @@
             envChart.data.datasets[0].data.shift();
             envChart.data.datasets[1].data.shift();
           }
-
           envChart.update();
         }
       } catch (e) {}
     }
 
-    // 6. Alarm PPOŻ
+    // 6. Alarm PPOŻ z wymuszeniem stanu
     if (topic === "parking/alerts/fire") {
       const banner = document.getElementById('alarmBanner');
       if (msg === "ALARM") {
+        trybAlarmuAktywny = true;
         banner.style.display = "block";
+        // Wymuszenie wizualne otwarcia wszystkich 3 boksów
+        ustawPigułkę("g1Badge", true);
+        ustawPigułkę("g2Badge", true);
+        ustawPigułkę("g3Badge", true);
+        // Zablokowanie przycisków bram podczas ewakuacji
+        document.querySelectorAll('.gate-ctrl').forEach(btn => btn.disabled = true);
       } else if (msg === "CLEAR") {
+        trybAlarmuAktywny = false;
         banner.style.display = "none";
+        document.querySelectorAll('.gate-ctrl').forEach(btn => btn.disabled = false);
+        // Powrót do stanu domyślnego
+        ustawPigułkę("g1Badge", false);
+        ustawPigułkę("g2Badge", false);
+        ustawPigułkę("g3Badge", false);
       }
     }
   });
 
-  // Funkcje wysyłające komendy
   function setLights(state) {
     if (client.connected) {
       client.publish("parking/lights/set", state);
@@ -509,19 +507,42 @@
   }
 
   function controlGarage(gateNum, action) {
+    if (trybAlarmuAktywny) return;
     if (client.connected) {
+      // Wysłanie rozkazu w formacie JSON oraz na dedykowany kanał bramy
       const payload = JSON.stringify({ gate: gateNum, action: action });
       client.publish("parking/control/gates", payload);
+      client.publish("parking/garage/" + gateNum + "/set", action);
+      // Optymistyczna aktualizacja UI
+      ustawPigułkę("g" + gateNum + "Badge", action === 'OPEN');
     }
   }
 
   function sendFireAlarm(state) {
     if (client.connected) {
-      client.publish("parking/alerts/fire", state);
+      // Komunikat przesyłany z retainem = true lub standardowo
+      client.publish("parking/alerts/fire", state, { qos: 1 });
+      
+      // Jeśli użytkownik ręcznie klika ALARM, zatrzaskujemy UI natychmiast
+      const banner = document.getElementById('alarmBanner');
+      if (state === "ALARM") {
+        trybAlarmuAktywny = true;
+        banner.style.display = "block";
+        ustawPigułkę("g1Badge", true);
+        ustawPigułkę("g2Badge", true);
+        ustawPigułkę("g3Badge", true);
+        document.querySelectorAll('.gate-ctrl').forEach(btn => btn.disabled = true);
+      } else if (state === "CLEAR") {
+        trybAlarmuAktywny = false;
+        banner.style.display = "none";
+        document.querySelectorAll('.gate-ctrl').forEach(btn => btn.disabled = false);
+        ustawPigułkę("g1Badge", false);
+        ustawPigułkę("g2Badge", false);
+        ustawPigułkę("g3Badge", false);
+      }
     }
   }
 
-  // Logika harmonogramu
   function toggleSchedule() {
     const isEnabled = document.getElementById('schedEnable').checked;
     const statusText = document.getElementById('schedStatusText');
@@ -543,23 +564,16 @@
 
     const now = new Date();
     const curTime = String(now.getHours()).padStart(2, '0') + ":" + String(now.getMinutes()).padStart(2, '0');
-
     const tOn = document.getElementById('timeOn').value;
     const tOff = document.getElementById('timeOff').value;
 
-    let powinnoSwiecic = false;
-
-    if (tOn < tOff) {
-      powinnoSwiecic = (curTime >= tOn && curTime < tOff);
-    } else {
-      powinnoSwiecic = (curTime >= tOn || curTime < tOff);
-    }
+    let powinnoSwiecic = (tOn < tOff) ? (curTime >= tOn && curTime < tOff) : (curTime >= tOn || curTime < tOff);
 
     if (powinnoSwiecic !== ostatniStanHarmonogramu) {
       ostatniStanHarmonogramu = powinnoSwiecic;
       const cmd = powinnoSwiecic ? "ON" : "OFF";
       setLights(cmd);
-      console.log(`[Harmonogram] Zmiana stanu oświetlenia na: ${cmd} (czas: ${curTime})`);
+      console.log(`[Harmonogram] Zmiana stanu oświetlenia na: ${cmd} (${curTime})`);
     }
   }
 
