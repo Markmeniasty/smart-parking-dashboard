@@ -35,7 +35,7 @@
       <p class="val-sub" style="margin-top: 4px;">Uwierzytelnienie operatora węzła IoT</p>
     </div>
     <form id="loginForm" onsubmit="event.preventDefault(); wykonajLogowanie();" style="display: flex; flex-direction: column; gap: 12px; margin-top: 6px;">
-      <input type="text" id="loginUser" class="login-input" placeholder="Login (np. admin / marek)" required autocomplete="username">
+      <input type="text" id="loginUser" class="login-input" placeholder="Login" required autocomplete="username">
       <input type="password" id="loginPass" class="login-input" placeholder="Hasło dyspozytora" required autocomplete="current-password">
       <div id="loginError" style="color: var(--red); font-size: 0.8rem; display: none;">Nieprawidłowe dane! Domyślne: admin / 1234</div>
       <button type="submit" class="btn-primary" style="padding: 12px; margin-top: 6px;">ZALOGUJ DO SYSTEMU</button>
