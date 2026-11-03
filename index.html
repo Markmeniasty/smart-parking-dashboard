@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <meta name="theme-color" content="#0b1120">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.json">
+  
+  <title>Smart Parking - Dyspozytornia IoT</title>
+  
+  <!-- Fonty Google -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  
+  <!-- Zewnętrzne biblioteki -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+  <!-- Wydzielony arkusz stylów -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body onclick="odblokujAudio()">
+
+<!-- EKRAN LOGOWANIA -->
+<div id="authOverlay">
+  <div class="login-box">
+    <div class="login-logo">P</div>
+    <div>
+      <h2 style="font-size: 1.35rem; font-weight: 800; color: white;">Dyspozytornia Smart Parking</h2>
+      <p class="val-sub" style="margin-top: 4px;">Uwierzytelnienie operatora węzła IoT</p>
+    </div>
+    <form id="loginForm" onsubmit="event.preventDefault(); wykonajLogowanie();" style="display: flex; flex-direction: column; gap: 12px; margin-top: 6px;">
+      <input type="text" id="loginUser" class="login-input" placeholder="Login (np. admin / marek)" required autocomplete="username">
+      <input type="password" id="loginPass" class="login-input" placeholder="Hasło dyspozytora" required autocomplete="current-password">
+      <div id="loginError" style="color: var(--red); font-size: 0.8rem; display: none;">Nieprawidłowe dane! Domyślne: admin / 1234</div>
+      <button type="submit" class="btn-primary" style="padding: 12px; margin-top: 6px;">ZALOGUJ DO SYSTEMU</button>
+    </form>
+  </div>
+</div>
+
+<div class="container">
+  <!-- BANER ALARMOWY -->
+  <div id="alarmBanner" class="alarm-banner">
+    ⚠️ WYKRYTO ZAGROŻENIE POŻAROWE! EWAKUACJA MAKIETY AKTYWNA! ⚠️
+  </div>
+
+  <!-- HEADER Z ZEGAREM I DATĄ -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">P</div>
+      <div>
+        <div class="brand-title">Smart Parking IoT</div>
+        <div class="brand-sub">System Zarządzania i Telemetrii Węzłów ESP32</div>
+      </div>
+    </div>
+
+    <!-- ZEGAREK CZASU RZECZYWISTEGO I DATA -->
+    <div class="header-center">
+      <div class="clock-display" id="headerClock">--:--:--</div>
+      <div class="date-display" id="headerDate">-- -- ----</div>
+    </div>
+
+    <div class="header-actions">
+      <div class="user-pill" id="userBadge" style="display: none;">
+        <span>👤</span> <span id="userNameDisplay" style="font-weight: 700; color: var(--accent);">admin</span>
+        <button onclick="wyloguj()" class="btn-secondary" style="padding: 3px 8px; font-size: 0.72rem; border-radius: 6px; border: 1px solid rgba(239, 68, 68, 0.4); color: var(--red); background: rgba(239, 68, 68, 0.1); cursor: pointer;">
+          Wyloguj
+        </button>
+      </div>
+
+      <div id="netStatus" class="status-badge">
+        <span class="dot"></span> <span id="netText">ŁĄCZENIE...</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- LISTA WĘZŁÓW ESP32 (LAST SEEN) -->
+  <div class="nodes-bar">
+    <div class="node-pill">
+      <span class="node-tag">
+        <span class="node-indicator" id="dotNode1"></span>
+        Węzeł 1 (Boksy G1-G3)
+      </span>
+      <span class="node-time" id="lastSeenNode1">Oczekiwanie...</span>
+    </div>
+    <div class="node-pill">
+      <span class="node-tag">
+        <span class="node-indicator" id="dotNode2"></span>
+        Węzeł 2 (Szlaban / Światła)
+      </span>
+      <span class="node-time" id="lastSeenNode2">Oczekiwanie...</span>
+    </div>
+    <div class="node-pill">
+      <span class="node-tag">
+        <span class="node-indicator" id="dotNode3"></span>
+        Węzeł 3 (CYD HMI / DHT22)
+      </span>
+      <span class="node-time" id="lastSeenNode3">Oczekiwanie...</span>
+    </div>
+  </div>
+
+  <!-- NAWIGACJA ZAKŁADKOWA -->
+  <div class="tabs-bar">
+    <button class="tab-btn active" onclick="pokazZakladke('tab-pulpit', this)">
+      <span>🎛️</span> Pulpit Sterowniczy
+    </button>
+    <button class="tab-btn" onclick="pokazZakladke('tab-rzut', this)">
+      <span>🗺️</span> Interaktywny Rzut Makiety
+    </button>
+    <button class="tab-btn" onclick="pokazZakladke('tab-wykresy', this)">
+      <span>📈</span> Telemetria i Środowisko
+    </button>
+    <button class="tab-btn" onclick="pokazZakladke('tab-logi', this)">
+      <span>🗄️</span> Baza Danych (<span id="logCountBadge">0</span>)
+    </button>
+  </div>
+
+  <!-- ZAKŁADKA 1: PULPIT STEROWNICZY -->
+  <div id="tab-pulpit" class="tab-content active">
+    <div class="grid">
+      <!-- WĘZEŁ 2 -->
+      <div class="card">
+        <h2>🅿️ Pojemność i Oświetlenie (Węzeł 2)</h2>
+        <div class="row">
+          <div>
+            <div class="val-sub">Dostępne miejsca:</div>
+            <div id="slotsVal" class="val-display">3 / 3</div>
+          </div>
+          <div>
+            <div class="val-sub">Klapa śmietnika:</div>
+            <span id="trashBadge" class="badge badge-closed">ZAMKNIĘTA</span>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top: 4px;">
+          <span class="val-sub">Stan latarń makiety:</span>
+          <span id="lightBadge" class="badge badge-closed">WYŁĄCZONE</span>
+        </div>
+
+        <div class="btn-group">
+          <button class="btn-primary" onclick="setLightsManual('ON')">Włącz Światła</button>
+          <button class="btn-secondary" onclick="setLightsManual('OFF')">Wyłącz Światła</button>
+        </div>
+
+        <!-- HARMONOGRAM -->
+        <div class="sched-box">
+          <div class="row">
+            <div>
+              <div style="font-weight: 700; font-size: 0.85rem;">Harmonogram Oświetlenia</div>
+              <div id="schedStatusText" class="val-sub">Status: Nieaktywny</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="schedEnable" onchange="toggleSchedule()">
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="row" style="gap: 10px;">
+            <div style="flex: 1;">
+              <span class="val-sub">Włącz od:</span>
+              <input type="time" id="timeOn" value="18:00" onchange="checkScheduleNow()">
+            </div>
+            <div style="flex: 1;">
+              <span class="val-sub">Wyłącz do:</span>
+              <input type="time" id="timeOff" value="06:00" onchange="checkScheduleNow()">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- WĘZEŁ 1 -->
+      <div class="card">
+        <h2>🚗 Boksy Garażowe (Węzeł 1)</h2>
+        
+        <!-- BOKS 1 -->
+        <div class="garage-item">
+          <div class="row">
+            <span style="font-weight: 600;">Boks G1:</span>
+            <span id="g1Badge" class="badge badge-closed">ZAMKNIĘTY</span>
+          </div>
+          <div class="btn-group">
+            <button class="btn-secondary gate-ctrl" onclick="controlGarage(1, 'OPEN')">Otwórz G1</button>
+            <button class="btn-secondary gate-ctrl" onclick="controlGarage(1, 'CLOSE')">Zamknij G1</button>
+          </div>
+        </div>
+
+        <!-- BOKS 2 -->
+        <div class="garage-item">
+          <div class="row">
+            <span style="font-weight: 600;">Boks G2:</span>
+            <span id="g2Badge" class="badge badge-closed">ZAMKNIĘTY</span>
+          </div>
+          <div class="btn-group">
+            <button class="btn-secondary gate-ctrl" onclick="controlGarage(2, 'OPEN')">Otwórz G2</button>
+            <button class="btn-secondary gate-ctrl" onclick="controlGarage(2, 'CLOSE')">Zamknij G2</button>
+          </div>
+        </div>
+
+        <!-- BOKS 3 -->
+        <div class="garage-item">
+          <div class="row">
+            <span style="font-weight: 600;">Boks G3:</span>
+            <span id="g3Badge" class="badge badge-closed">ZAMKNIĘTY</span>
+          </div>
+          <div class="btn-group">
+            <button class="btn-secondary gate-ctrl" onclick="controlGarage(3, 'OPEN')">Otwórz G3</button>
+            <button class="btn-secondary gate-ctrl" onclick="controlGarage(3, 'CLOSE')">Zamknij G3</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- WĘZEŁ 3: BEZPIECZEŃSTWO -->
+      <div class="card card-full">
+        <h2>🔥 Bezpieczeństwo i Test Ewakuacji PPOŻ (Węzeł 3)</h2>
+        <div class="row" style="flex-wrap: wrap; gap: 14px;">
+          <div>
+            <div class="val-sub">Status Procedury Ewakuacyjnej:</div>
+            <div id="alarmStatusLabel" style="font-size: 1.15rem; font-weight: 800; color: var(--green);">BEZPIECZNIE (BRAK ZAGROŻENIA)</div>
+          </div>
+          <div class="btn-group" class="btn-group fire-actions-group">
+            <button class="btn-danger fire-admin-btn" onclick="sendFireAlarm('ALARM')">🚨 WYZWÓL ALARM</button>
+            <button class="btn-secondary fire-admin-btn" onclick="sendFireAlarm('CLEAR')">ODWOŁAJ ALARM</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ZAKŁADKA 2: INTERAKTYWNY RZUT MAKIETY (SVG) -->
+  <div id="tab-rzut" class="tab-content">
+    <div class="card card-full">
+      <div class="row">
+        <h2>🗺️ Interaktywny Rzut Makiety Parkingowej (2D SVG)</h2>
+        <span class="val-sub">Kliknij boks garażowy lub latarnię, aby przełączyć stan</span>
+      </div>
+
+      <div class="map-container">
+        <svg class="parking-svg" viewBox="0 0 920 620" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <radialGradient id="lampGlowA" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#fde047" stop-opacity="0.85"/>
+              <stop offset="45%" stop-color="#eab308" stop-opacity="0.3"/>
+              <stop offset="100%" stop-color="#0b1120" stop-opacity="0"/>
+            </radialGradient>
+            <radialGradient id="smokeGrad" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#ef4444" stop-opacity="0.75"/>
+              <stop offset="55%" stop-color="#b91c1c" stop-opacity="0.4"/>
+              <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+
+          <!-- TŁO CAŁEJ MAKIETY -->
+          <rect x="10" y="10" width="900" height="600" rx="16" fill="#0b1120" stroke="#1f293d" stroke-width="2"/>
+
+          <!-- 1. GŁÓWNA STREFA LEWA (PARKING / INFRASTRUKTURA - WĘZEŁ 2) -->
+          <rect x="30" y="30" width="420" height="280" rx="10" fill="#111827" stroke="#38bdf8" stroke-width="2.5"/>
+          <text x="50" y="60" fill="#64748b" font-size="12" font-weight="800" letter-spacing="1">STREFA PARKINGOWA (WĘZEŁ 2)</text>
+
+          <!-- ŚMIETNIK ECO -->
+          <g id="svgTrashGroup" style="cursor: pointer;" onclick="toggleTrashFromSvg()">
+            <rect id="svgTrashBox" x="160" y="90" width="160" height="95" rx="8" fill="#064e3b" stroke="#10b981" stroke-width="3"/>
+            <rect id="svgTrashLid" x="170" y="100" width="140" height="20" rx="4" fill="#10b981" opacity="0.3"/>
+            <text x="240" y="145" fill="#34d399" font-size="15" font-weight="800" text-anchor="middle">ŚMIETNIK</text>
+            <text id="svgTrashTxt" x="240" y="168" fill="#94a3b8" font-size="11" font-weight="700" text-anchor="middle">ZAMKNIĘTY</text>
+          </g>
+
+          <!-- OŚWIETLENIE - 3 LATARNIE NA DOLE LEWEJ STREFY -->
+          <circle id="svgGlow1" class="svg-light-glow" cx="95" cy="265" r="95" fill="url(#lampGlowA)" opacity="0"/>
+          <circle id="svgGlow2" class="svg-light-glow" cx="240" cy="265" r="95" fill="url(#lampGlowA)" opacity="0"/>
+          <circle id="svgGlow3" class="svg-light-glow" cx="380" cy="265" r="95" fill="url(#lampGlowA)" opacity="0"/>
+
+          <line x1="95" y1="265" x2="380" y2="265" stroke="#334155" stroke-width="2" stroke-dasharray="6 4"/>
+
+          <g style="cursor: pointer;" onclick="setLightsManual(ostatnieSwiatla === 'ON' ? 'OFF' : 'ON')">
+            <ellipse cx="95" cy="265" rx="28" ry="14" fill="none" stroke="#eab308" stroke-width="2.5"/>
+            <circle id="svgLampDot1" cx="95" cy="265" r="6" fill="#64748b"/>
+          </g>
+          <g style="cursor: pointer;" onclick="setLightsManual(ostatnieSwiatla === 'ON' ? 'OFF' : 'ON')">
+            <ellipse cx="240" cy="265" rx="28" ry="14" fill="none" stroke="#eab308" stroke-width="2.5"/>
+            <circle id="svgLampDot2" cx="240" cy="265" r="6" fill="#64748b"/>
+          </g>
+          <g style="cursor: pointer;" onclick="setLightsManual(ostatnieSwiatla === 'ON' ? 'OFF' : 'ON')">
+            <ellipse cx="380" cy="265" rx="28" ry="14" fill="none" stroke="#eab308" stroke-width="2.5"/>
+            <circle id="svgLampDot3" cx="380" cy="265" r="6" fill="#64748b"/>
+          </g>
+          <text x="240" y="295" fill="#eab308" font-size="11" font-weight="700" text-anchor="middle">Oświetlenie</text>
+
+          <!-- 2. WĘZEŁ 3 (CYD HMI + SENSORY) -->
+          <g>
+            <rect x="475" y="30" width="180" height="75" rx="8" fill="#1e1b4b" stroke="#818cf8" stroke-width="2.5"/>
+            <text x="565" y="58" fill="#c7d2fe" font-size="14" font-weight="800" text-anchor="middle">WĘZEŁ 3 (CYD)</text>
+            <text id="svgTempHum" x="565" y="85" fill="#38bdf8" font-size="12" font-weight="700" text-anchor="middle">--.-°C | --%</text>
+          </g>
+
+          <!-- 3. SZLABAN WJAZDOWY -->
+          <g id="svgBarrierGroup">
+            <line x1="230" y1="360" x2="230" y2="540" stroke="#475569" stroke-width="5" stroke-linecap="round"/>
+            <circle cx="230" cy="450" r="10" fill="#0284c7" stroke="#38bdf8" stroke-width="2"/>
+            <text x="240" y="405" fill="#94a3b8" font-size="13" font-weight="800">SZLABAN</text>
+          </g>
+
+          <!-- 4. PIONOWY UKŁAD BOKSÓW GARAŻOWYCH (200x160 px) -->
+          <!-- BOKS G1 -->
+          <g class="svg-garage" onclick="toggleGarageFromSvg(1)">
+            <rect id="svgG1Box" x="690" y="30" width="200" height="160" rx="8" fill="#1e293b" stroke="#334155" stroke-width="3"/>
+            <rect id="svgG1Door" x="696" y="170" width="188" height="15" rx="3" fill="#334155" stroke="#64748b" stroke-width="1.5"/>
+            <text x="790" y="95" fill="#f8fafc" font-size="22" font-weight="800" text-anchor="middle">G1</text>
+            <text id="svgG1Label" x="790" y="130" fill="#94a3b8" font-size="13" font-weight="700" text-anchor="middle">ZAMKNIĘTY</text>
+          </g>
+
+          <!-- BOKS G2 -->
+          <g class="svg-garage" onclick="toggleGarageFromSvg(2)">
+            <rect id="svgG2Box" x="690" y="220" width="200" height="160" rx="8" fill="#1e293b" stroke="#334155" stroke-width="3"/>
+            <rect id="svgG2Door" x="696" y="360" width="188" height="15" rx="3" fill="#334155" stroke="#64748b" stroke-width="1.5"/>
+            <text x="790" y="285" fill="#f8fafc" font-size="22" font-weight="800" text-anchor="middle">G2</text>
+            <text id="svgG2Label" x="790" y="320" fill="#94a3b8" font-size="13" font-weight="700" text-anchor="middle">ZAMKNIĘTY</text>
+          </g>
+
+          <!-- BOKS G3 -->
+          <g class="svg-garage" onclick="toggleGarageFromSvg(3)">
+            <rect id="svgG3Box" x="690" y="410" width="200" height="160" rx="8" fill="#1e293b" stroke="#334155" stroke-width="3"/>
+            <rect id="svgG3Door" x="696" y="550" width="188" height="15" rx="3" fill="#334155" stroke="#64748b" stroke-width="1.5"/>
+            <text x="790" y="475" fill="#f8fafc" font-size="22" font-weight="800" text-anchor="middle">G3</text>
+            <text id="svgG3Label" x="790" y="510" fill="#94a3b8" font-size="13" font-weight="700" text-anchor="middle">ZAMKNIĘTY</text>
+          </g>
+
+          <!-- ANIMACJA DYMU PPOŻ -->
+          <circle id="svgSmoke1" class="svg-smoke-overlay" cx="240" cy="180" r="180" fill="url(#smokeGrad)"/>
+          <circle id="svgSmoke2" class="svg-smoke-overlay" cx="560" cy="100" r="140" fill="url(#smokeGrad)"/>
+          <circle id="svgSmoke3" class="svg-smoke-overlay" cx="790" cy="300" r="210" fill="url(#smokeGrad)"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- ZAKŁADKA 3: TELEMETRIA I ŚRODOWISKO -->
+  <div id="tab-wykresy" class="tab-content">
+    <div class="grid">
+      <div class="card">
+        <h2>🌡️ Temperatura Otoczenia</h2>
+        <div id="tempVal" style="font-size: 2.4rem; font-weight: 800; color: var(--green);">--.- °C</div>
+        <div class="val-sub">Czujnik cyfrowy DHT22 (Węzeł 3 CYD)</div>
+      </div>
+      <div class="card">
+        <h2>💧 Wilgotność Powietrza</h2>
+        <div id="humVal" style="font-size: 2.4rem; font-weight: 800; color: var(--accent);">-- %</div>
+        <div class="val-sub">Pomiar higrometru w czasie rzeczywistym</div>
+      </div>
+      <div class="card card-full">
+        <div class="row">
+          <h2>📊 Wykres Parametrów Środowiskowych (Live Stream)</h2>
+          <span class="val-sub">Ostatnie 20 próbek telemetrii</span>
+        </div>
+        <div class="chart-container">
+          <canvas id="envChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ZAKŁADKA 4: BAZA DANYCH LOGÓW -->
+  <div id="tab-logi" class="tab-content">
+    <div class="card card-full">
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-val" id="statGatesCount">0</div>
+          <div class="stat-lbl">Otwarcia bram (ostatnia godz.)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="statAlarmsCount" style="color: var(--red);">0</div>
+          <div class="stat-lbl">Alarmy PPOŻ (wszystkie)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="statTrafficCount" style="color: var(--green);">0</div>
+          <div class="stat-lbl">Zdarzenia wjazdu / ruchu</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="statTotalLogs">0</div>
+          <div class="stat-lbl">Wszystkie wpisy w bazie</div>
+        </div>
+      </div>
+
+      <div class="filter-panel">
+        <select id="filterNode" class="filter-select" onchange="filtrujLogiUI()">
+          <option value="ALL">Wszystkie Węzły</option>
+          <option value="WĘZEŁ 1">WĘZEŁ 1 (Garaże)</option>
+          <option value="WĘZEŁ 2">WĘZEŁ 2 (Infrastruktura)</option>
+          <option value="WĘZEŁ 3">WĘZEŁ 3 (Środowisko)</option>
+          <option value="ALARM">ALARM PPOŻ</option>
+          <option value="SYSTEM">SYSTEM / AUTH</option>
+        </select>
+
+        <select id="filterTime" class="filter-select" onchange="filtrujLogiUI()">
+          <option value="ALL">Cała historia</option>
+          <option value="1H">Ostatnia 1 godzina</option>
+          <option value="24H">Ostatnie 24 godziny</option>
+        </select>
+
+        <input type="text" id="filterSearch" class="filter-search" placeholder="Szukaj frazy (np. brama, otwarta, dym)..." oninput="filtrujLogiUI()">
+
+        <div style="display: flex; gap: 8px;">
+          <button class="btn-secondary" onclick="eksportujLogiCSV()" style="font-size: 0.78rem; padding: 8px 12px;">Pobierz CSV</button>
+          <button class="btn-secondary" onclick="wyczyscBazeLogow()" style="font-size: 0.78rem; padding: 8px 12px; color: var(--red);">Wyczyść</button>
+        </div>
+      </div>
+
+      <div class="logs-table-wrapper">
+        <table class="logs-table">
+          <thead>
+            <tr>
+              <th style="width: 130px;">Czas (Timestamp)</th>
+              <th style="width: 100px;">Węzeł</th>
+              <th style="width: 190px;">Kanał MQTT (Topic)</th>
+              <th>Zarejestrowana Wartość / Komunikat</th>
+            </tr>
+          </thead>
+          <tbody id="logsTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js');
+  }
+</script>
+
+<script src="app.js"></script>
+
+</body>
+</html>
